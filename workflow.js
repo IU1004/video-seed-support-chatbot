@@ -7,13 +7,37 @@ const readlineSync = require('readline-sync');
 
 async function detectIntent(userInput) {
   const { extractFields } = require('./extract');
-  const systemPrompt = 'Classify the user intent as one of: "plan event", "discover event", "go live streaming". Be flexible - accept variations like "plan an event" or "I want to plan event". Reply with only the exact intent phrase.';
+  const systemPrompt = `
+You are an intent classifier for a chatbot. The user may use any natural language to express their intent.
+Classify the user's intent as exactly one of these:
+- plan event
+- discover event
+- go live streaming
+
+Reply with ONLY one of the above phrases, and nothing else. Be flexible and infer intent even if the user uses indirect or creative language.
+`;
+
   const result = await extractFields(systemPrompt, userInput);
-  // Normalize the result to match expected intents
-  const normalized = (typeof result === 'string' ? result : '').toLowerCase();
-  if (normalized.includes('plan')) return 'plan event';
-  if (normalized.includes('discover')) return 'discover event';
-  if (normalized.includes('live') || normalized.includes('stream')) return 'go live streaming';
+  let normalized = '';
+  if (typeof result === 'string') {
+    normalized = result.toLowerCase();
+  } else if (typeof result === 'object' && result !== null) {
+    const values = Object.values(result);
+    if (values.length > 0 && typeof values[0] === 'string') {
+      normalized = values[0].toLowerCase();
+    }
+  }
+  // Accept only exact matches
+  if (normalized === 'plan event') return 'plan event';
+  if (normalized === 'discover event') return 'discover event';
+  if (normalized === 'go live streaming') return 'go live streaming';
+  // Fallback: keyword matching in original user input
+  const fallback = userInput.toLowerCase();
+  if (fallback.includes('plan') && fallback.includes('event')) return 'plan event';
+  if (fallback.includes('discover') && fallback.includes('event')) return 'discover event';
+  if (fallback.includes('live') || fallback.includes('stream')) return 'go live streaming';
+  // Optionally log ambiguous output for debugging
+  // console.log('Ambiguous intent output:', result);
   return '';
 }
 
@@ -85,10 +109,20 @@ async function runPlanEventWorkflow(state, workflowState) {
           const emoji = await getEmojiForContext(agent.confirm(workflowState.fields));
           console.log(`${emoji} ${agent.confirm(workflowState.fields)}`);
           const confirmInput = readlineSync.question("You: ");
-          if (confirmInput.trim().toLowerCase().startsWith("y")) {
+          const lowerConfirm = confirmInput.trim().toLowerCase();
+
+          // Check for workflow switch intent
+          const switchIntent = await detectIntent(confirmInput);
+          if (switchIntent && switchIntent !== "plan event") {
+            setWorkflowStatus(state, intentToWorkflowKey(switchIntent), "Ongoing");
+            console.log(`Switching to ${intentToDisplayName(switchIntent)}...`);
+            return "switch";
+          }
+
+          if (lowerConfirm.startsWith("y")) {
             agentComplete = true;
             break;
-          } else if (confirmInput.trim().toLowerCase() === "exit") {
+          } else if (lowerConfirm === "exit") {
             return false;
           } else {
             let correctionPrompt = agent.extractSystem;
