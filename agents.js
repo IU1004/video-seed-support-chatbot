@@ -36,10 +36,25 @@ const planEventAgents = [
       'How many tickets will be available, and what is the price per ticket? (Say "free" if no charge)',
     extractSystem:
       'Given the current and previous user messages, extract the ticket quantity and price as flexibly as possible, even if the user is informal, creative, or provides partial info. Reply as JSON: {"ticketQuantity": "...", "ticketPrice": "..."}',
-    validate: (v) =>
-      !!v.ticketQuantity &&
-      v.ticketPrice !== undefined &&
-      v.ticketPrice !== null,
+    validate: (v) => {
+      // Validate ticketQuantity: must be a positive integer
+      const quantity = parseInt(v.ticketQuantity, 10);
+      const validQuantity = Number.isInteger(quantity) && quantity > 0;
+      // Validate ticketPrice: must be a positive number, or 'free', or a string like '$30' or '30'
+      const price = v.ticketPrice;
+      let validPrice = false;
+      if (typeof price === 'string') {
+        const trimmed = price.trim().toLowerCase();
+        if (trimmed === 'free') {
+          validPrice = true;
+        } else if (/^\$?\d+(\.\d{1,2})?$/.test(trimmed.replace(/\s/g, ''))) {
+          validPrice = parseFloat(trimmed.replace(/[^\d.]/g, '')) > 0;
+        }
+      } else if (typeof price === 'number') {
+        validPrice = price > 0;
+      }
+      return validQuantity && validPrice;
+    },
     confirm: (v) =>
       `Ticket Quantity: ${v.ticketQuantity}\nTicket Price: ${v.ticketPrice}\nIs this correct? (yes/no)`,
   },
@@ -61,6 +76,26 @@ const planEventAgents = [
       'Given the current and previous user messages, extract the budget as flexibly as possible, even if the user is informal, creative, or provides partial info. Reply as JSON: {"budget": "..."}',
     validate: (v) => !!v.budget,
     confirm: (v) => `Budget: ${v.budget}\nIs this correct? (yes/no)`,
+  },
+  {
+    name: "ImageAgent",
+    fields: ["wantsImage", "imageDescription", "generatedImageUrl"],
+    prompt:
+      "Would you like to create an image for your event using AI? (yes/no)",
+    extractSystem:
+      'Given the current and previous user messages, extract whether the user wants to generate an image (yes/no). If yes, ask for a description for the image. If the user provides a description and presses enter, proceed to generate the image. Reply as JSON: {"wantsImage": "yes/no", "imageDescription": "...", "generatedImageUrl": "..."}',
+    validate: (v) => {
+      if (v.wantsImage && v.wantsImage.toLowerCase() === 'yes') {
+        return !!v.imageDescription && !!v.generatedImageUrl;
+      }
+      return v.wantsImage && v.wantsImage.toLowerCase() === 'no';
+    },
+    confirm: (v) => {
+      if (v.wantsImage && v.wantsImage.toLowerCase() === 'yes') {
+        return `AI Image Description: ${v.imageDescription}\nImage generated: ${v.generatedImageUrl ? v.generatedImageUrl : 'Not generated yet.'}\nIs this correct? (yes/no)`;
+      }
+      return `No AI image will be generated. Is this correct? (yes/no)`;
+    },
   },
   {
     name: "NftTicketingAndPaymentAgent",

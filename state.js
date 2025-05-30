@@ -1,5 +1,6 @@
 // state.js
-function getInitialState() {
+
+function createInitialUserState() {
   return [
     {
       workflow: "planEvent",
@@ -29,14 +30,24 @@ function getInitialState() {
   ];
 }
 
-function getCurrentWorkflow(state) {
-  return state.find((w) => w.status === "Ongoing");
+// All user states in memory (for demo; use a DB for production)
+const allUserStates = {};
+
+function getOrCreateUserState(userId) {
+  if (!allUserStates[userId]) {
+    allUserStates[userId] = createInitialUserState();
+  }
+  return allUserStates[userId];
 }
 
-function setWorkflowStatus(state, workflowKey, status) {
-  state.forEach((w) => {
+function getCurrentWorkflow(userState) {
+  return userState.find((w) => w.status === "Ongoing");
+}
+
+function setWorkflowStatus(userState, workflowKey, status) {
+  userState.forEach((w) => {
     w.status = w.workflow === workflowKey ? status : "Stop";
   });
 }
 
-module.exports = { getInitialState, getCurrentWorkflow, setWorkflowStatus }; 
+module.exports = { getOrCreateUserState, getCurrentWorkflow, setWorkflowStatus }; 

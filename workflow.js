@@ -4,6 +4,7 @@ const { extractFields } = require('./extract');
 const { getEmojiForContext } = require('./emoji');
 const { getCurrentWorkflow, setWorkflowStatus } = require('./state');
 const readlineSync = require('readline-sync');
+const { generateImage } = require('./generateImage');
 
 async function detectIntent(userInput) {
   const { extractFields } = require('./extract');
@@ -54,9 +55,79 @@ function intentToDisplayName(intent) {
   return intent;
 }
 
-async function runPlanEventWorkflow(state, workflowState) {
+async function runPlanEventWorkflow(userState, workflowState) {
   for (const agent of planEventAgents) {
     let agentComplete = false;
+    // Special handling for ImageAgent
+    if (agent.name === "ImageAgent") {
+      // Step 1: Ask if user wants an AI image
+      while (true) {
+        if (!workflowState.fields.wantsImage) {
+          const emoji = await getEmojiForContext(agent.prompt);
+          console.log(`${emoji} ${agent.prompt}`);
+          const userInput = readlineSync.question("You: ");
+          if (userInput.trim().toLowerCase() === "exit") return false;
+          const extracted = await extractFields(agent.extractSystem, userInput);
+          if (extracted.wantsImage) workflowState.fields.wantsImage = extracted.wantsImage.toLowerCase();
+        }
+        if (workflowState.fields.wantsImage === "no") {
+          // User does not want an image, skip to next agent
+          agentComplete = true;
+          break;
+        } else if (workflowState.fields.wantsImage === "yes") {
+          // Step 2: Ask for image description, generate image, confirm
+          while (true) {
+            // Ask for image description
+            const descPrompt = "Please provide a description for the AI image you'd like to generate.";
+            const emoji = await getEmojiForContext(descPrompt);
+            console.log(`${emoji} ${descPrompt}`);
+            const descInput = readlineSync.question("You: ");
+            if (descInput.trim().toLowerCase() === "exit") return false;
+            workflowState.fields.imageDescription = descInput.trim();
+            // Step 3: Generate image
+            try {
+              console.log("Generating AI image, please wait...");
+              const url = await generateImage(workflowState.fields.imageDescription);
+              workflowState.fields.generatedImageUrl = url;
+              // Step 4: Show image URL and ask for confirmation
+              const confirmPrompt = `AI Image Description: ${workflowState.fields.imageDescription}\nImage generated: ${url}\nIs this image good? (yes/no)`;
+              const confirmEmoji = await getEmojiForContext(confirmPrompt);
+              console.log(`${confirmEmoji} ${confirmPrompt}`);
+              const confirmInput = readlineSync.question("You: ");
+              if (confirmInput.trim().toLowerCase().startsWith("y")) {
+                agentComplete = true;
+                break;
+              } else if (confirmInput.trim().toLowerCase() === "exit") {
+                return false;
+              } else {
+                // User wants to try again, clear description and image URL
+                workflowState.fields.imageDescription = null;
+                workflowState.fields.generatedImageUrl = null;
+                console.log("Let's try generating a new image. Please provide a new description.");
+              }
+            } catch (err) {
+              console.log("Failed to generate image:", err.message);
+              workflowState.fields.generatedImageUrl = null;
+              const retryInput = readlineSync.question("Would you like to try a different description? (yes/no): ");
+              if (retryInput.trim().toLowerCase() !== "yes") {
+                // User does not want to retry, skip image
+                workflowState.fields.wantsImage = "no";
+                agentComplete = true;
+                break;
+              }
+              workflowState.fields.imageDescription = null;
+            }
+          }
+          if (agentComplete) break;
+        } else {
+          // Invalid input, ask again
+          console.log("Please answer 'yes' or 'no'.");
+          workflowState.fields.wantsImage = null;
+        }
+      }
+      continue; // Move to next agent
+    }
+    // Default agent logic for all other agents
     while (!agentComplete) {
       let missingFields = agent.fields.filter((f) => !workflowState.fields[f]);
       while (missingFields.length > 0 || !agent.validate(workflowState.fields)) {
@@ -80,7 +151,7 @@ async function runPlanEventWorkflow(state, workflowState) {
         if (isSwitch) {
           const intent = await detectIntent(userInput);
           if (intent !== "plan event") {
-            setWorkflowStatus(state, intentToWorkflowKey(intent), "Ongoing");
+            setWorkflowStatus(userState, intentToWorkflowKey(intent), "Ongoing");
             console.log(`Switching to ${intentToDisplayName(intent)}...`);
             return "switch";
           }
@@ -114,7 +185,7 @@ async function runPlanEventWorkflow(state, workflowState) {
           // Check for workflow switch intent
           const switchIntent = await detectIntent(confirmInput);
           if (switchIntent && switchIntent !== "plan event") {
-            setWorkflowStatus(state, intentToWorkflowKey(switchIntent), "Ongoing");
+            setWorkflowStatus(userState, intentToWorkflowKey(switchIntent), "Ongoing");
             console.log(`Switching to ${intentToDisplayName(switchIntent)}...`);
             return "switch";
           }
