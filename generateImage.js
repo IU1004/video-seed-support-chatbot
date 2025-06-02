@@ -13,7 +13,7 @@ async function generateImage(description) {
   }
   try {
     const response = await openai.images.generate({
-      model: "gpt-4.1",
+      model: "dall-e-2",
       prompt: description,
       n: 1,
       size: "256x256"
